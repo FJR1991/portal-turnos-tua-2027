@@ -1,0 +1,64 @@
+type CellValue = string | number | boolean;
+
+function main(workbook: ExcelScript.Workbook): string {
+  const names = [
+    "PERSONAL 27",
+    "VEHICULOS",
+    "PRODUCCION 27",
+    "PETICIONES MATERIAL"
+  ];
+  const sheets: { [key: string]: CellValue[][] } = {};
+
+  for (const name of names) {
+    const sheet = workbook.getWorksheet(name);
+    if (!sheet) {
+      throw new Error(`No se encontró la hoja ${name}.`);
+    }
+
+    const usedRange = sheet.getUsedRange();
+    if (!usedRange) {
+      throw new Error(`La hoja ${name} está vacía.`);
+    }
+
+    const values = usedRange.getValues() as CellValue[][];
+    let lastRow = values.length - 1;
+    while (lastRow >= 0 && isBlankRow(values[lastRow])) {
+      lastRow--;
+    }
+
+    if (lastRow < 0) {
+      throw new Error(`La hoja ${name} no contiene datos.`);
+    }
+
+    let lastColumn = -1;
+    for (let row = 0; row <= lastRow; row++) {
+      for (let column = 0; column < values[row].length; column++) {
+        if (!isBlank(values[row][column])) {
+          lastColumn = Math.max(lastColumn, column);
+        }
+      }
+    }
+
+    if (lastColumn < 0) {
+      throw new Error(`La hoja ${name} no contiene datos.`);
+    }
+
+    sheets[name] = values
+      .slice(0, lastRow + 1)
+      .map((row) => row.slice(0, lastColumn + 1));
+  }
+
+  return JSON.stringify({
+    success: true,
+    sheets: sheets,
+    generatedAt: new Date().toISOString()
+  });
+}
+
+function isBlank(value: CellValue): boolean {
+  return value === "";
+}
+
+function isBlankRow(row: CellValue[]): boolean {
+  return row.every(isBlank);
+}

@@ -19,27 +19,33 @@ El portal es estrictamente de consulta: no ofrece controles para abrir el Excel 
 
 La lista de personas se reconstruye desde los encabezados de `PERSONAL 27`; la de vehículos, desde `VEHICULOS`; y la de proveedores, desde `PETICIONES MATERIAL`. No son listas fijas en el portal: las altas, bajas y cambios del libro se reflejan en la siguiente carga de datos.
 
-La URL del servicio se configura en `data-source.js`, no en la interfaz. El proveedor previsto ahora es Microsoft 365, pero el endpoint está vacío: el enlace de uso compartido recibido requiere iniciar sesión y no es una URL de API que GitHub Pages pueda consultar directamente.
+El portal descarga `planning-data.json` de su mismo sitio en cada recarga. Power Automate mantiene ese archivo sincronizado desde SharePoint. El XLSX original, el enlace de uso compartido y las credenciales no se guardan en este repositorio.
 
-El endpoint debe responder JSONP, aceptar `year=2027`, `callback` y un parámetro de caché, y devolver este contrato:
+**El JSON será público**, igual que el repositorio y la página de GitHub Pages. Todos los datos que se escriban en él podrán ser descargados por cualquier persona, no solo por los empleados. Esta alternativa no concede permiso de escritura sobre el Excel, pero sí publica los datos de planificación.
 
-```js
-callback({
-	success: true,
-	sheets: {
-		"PERSONAL 27": [[/* filas y columnas */]],
-		"VEHICULOS": [[/* filas y columnas */]],
-		"PRODUCCION 27": [[/* filas y columnas */]],
-		"PETICIONES MATERIAL": [[/* filas y columnas */]]
-	}
-});
+## Configurar la sincronización
+
+1. Abre el libro en Excel Online y ve a **Automatizar > Nuevo script**. Copia el contenido de `scripts/ExportarPlanificacion2027.osts`, guarda el script como `ExportarPlanificacion2027` y ejecútalo una vez para comprobar que existen las cuatro hojas requeridas.
+2. En Power Automate crea un flujo automatizado con SharePoint **Cuando se crea o modifica un archivo (solo propiedades)**. Limita el flujo al archivo `27_PLANNING GENERAL TUA.xlsx`; añade Excel Online (Business) **Ejecutar script** y selecciona `ExportarPlanificacion2027`.
+3. Añade una petición HTTP `GET` a `https://api.github.com/repos/FJR1991/portal-turnos-tua-2027/contents/planning-data.json?ref=main`. Usa `Accept: application/vnd.github+json`, `X-GitHub-Api-Version: 2022-11-28` y `Authorization: Bearer <token>` para obtener el `sha` actual del archivo.
+4. Si cambió el resultado del script, añade una petición `PUT` a `https://api.github.com/repos/FJR1991/portal-turnos-tua-2027/contents/planning-data.json` con este cuerpo. Sustituye las referencias `Run_script` y `Get_file` por los nombres internos de las acciones de tu flujo:
+
+```json
+{
+	"message": "Actualizar planificación 2027",
+	"content": "@{base64(body('Run_script')?['result'])}",
+	"sha": "@{body('Get_file')?['sha']}"
+}
 ```
 
-El servicio debe leer el libro privado del lado servidor y exponer solo una operación de lectura. No debe ofrecer rutas ni permisos de escritura. No se deben incluir credenciales, enlaces de uso compartido ni el archivo Excel en este repositorio. Para Microsoft 365, se necesita un servicio intermedio autenticado con Microsoft Graph que lea el libro con permisos de solo lectura y devuelva los datos necesarios; el portal consumirá ese endpoint y no necesitará cambiar sus vistas.
+5. Crea un token fine-grained de GitHub limitado solo a `FJR1991/portal-turnos-tua-2027`, con permiso **Contents: Read and write**. Guárdalo como secreto/conexión segura de Power Automate y úsalo en el encabezado `Authorization`; nunca lo pongas en el flujo exportado, en el script de Office, en `index.html` o en `planning-data.json`.
+6. Guarda el flujo y modifica una celda de prueba en el Excel. Power Automate actualizará `planning-data.json`; GitHub Pages reconstruirá el sitio y, tras completarse la publicación, al recargar el portal se mostrarán los datos nuevos.
+
+El disparador puede ejecutarse varias veces mientras se edita el libro. Conviene comparar el JSON anterior con el resultado nuevo y omitir el `PUT` si no cambió, para evitar commits y despliegues innecesarios. La edición sigue haciéndose únicamente en SharePoint; el flujo solo lee el XLSX y escribe el JSON derivado en GitHub.
 
 Todos los empleados pueden consultar desde el portal los turnos de toda la plantilla. El navegador recibe los datos necesarios para mostrarlos, pero ni el portal ni el endpoint deben ofrecer operaciones para modificarlos.
 
-La configuración actual ya indica `provider: "microsoft"`. Para activar la sincronización falta desplegar el servicio de lectura y configurar su URL en `endpoint`.
+`data-source.js` apunta a `./planning-data.json`. El archivo inicial solo contiene un aviso de que Power Automate aún no ha ejecutado la primera sincronización.
 
 ## Publicar
 

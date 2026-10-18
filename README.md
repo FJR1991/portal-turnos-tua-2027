@@ -13,14 +13,32 @@ Portal independiente para consultar el libro de planificación 2027. No sustituy
 
 Los datos proceden de `PERSONAL 27`, `VEHICULOS`, `PRODUCCION 27` y `PETICIONES MATERIAL`. `BUSCADOR PERSONAL` y `TOTALES` se recalculan desde las hojas de planificación; `AUXILIAR` contiene referencias de meses y personal.
 
-## Probar con el Excel
+## Carga de datos
 
-Abre `index.html`, pulsa **Abrir Excel** y selecciona `27_PLANNING GENERAL TUA.xlsx`. El lector de XLSX se descarga desde jsDelivr, así que hace falta conexión a Internet.
+El portal es estrictamente de consulta: no ofrece controles para abrir el Excel o Google Sheets y no contiene operaciones para modificar el origen. Solicita los datos automáticamente cada vez que se abre o recarga la página.
 
-## Conectar Google Sheets
+La URL del servicio se configura en `data-source.js`, no en la interfaz. Actualmente está vacía porque aún no se ha conectado la hoja definitiva de 2027.
 
-Convierte una copia de la planificación en Google Sheets, conserva los nombres de las cuatro pestañas de datos y permite lectura a los usuarios del portal. Abre la sección **Google Sheets**, pega el enlace y pulsa **Conectar y cargar**. El enlace queda guardado en el almacenamiento local del navegador; el libro no se incorpora al repositorio.
+El endpoint debe responder JSONP, aceptar `year=2027`, `callback` y un parámetro de caché, y devolver este contrato:
+
+```js
+callback({
+	success: true,
+	sheets: {
+		"PERSONAL 27": [[/* filas y columnas */]],
+		"VEHICULOS": [[/* filas y columnas */]],
+		"PRODUCCION 27": [[/* filas y columnas */]],
+		"PETICIONES MATERIAL": [[/* filas y columnas */]]
+	}
+});
+```
+
+El servicio debe leer el libro privado del lado servidor y exponer solo una operación de lectura. No debe ofrecer rutas ni permisos de escritura. No se deben incluir credenciales, secretos ni el archivo Excel en este repositorio. Para Google, el endpoint puede ser un Google Apps Script que lea como propietario y devuelva los datos necesarios sin compartir el libro con los empleados. Si la empresa migra a Microsoft 365, un servicio intermedio con Microsoft Graph puede usar permisos de lectura y devolver el mismo contrato; el portal no necesitaría cambiar sus vistas.
+
+El portal no permite editar la hoja, pero el navegador sí recibe los datos que muestra para poder pintarlos y filtrarlos. Si se decide que cada empleado solo vea sus propios turnos, el servicio tendrá que autenticarlo y filtrar la respuesta en el servidor.
+
+La configuración actual usa el proveedor `google-apps-script`. Para la futura migración se podrá cambiar `provider` y `endpoint` en `data-source.js` al servicio Microsoft compatible.
 
 ## Publicar
 
-Este proyecto debe publicarse desde un repositorio independiente mediante GitHub Pages, usando la rama `main` y la carpeta raíz. El archivo de entrada es `index.html`.
+Este proyecto debe publicarse desde un repositorio independiente mediante GitHub Pages, usando la rama `main` y la carpeta raíz. El archivo de entrada es `index.html`. El acceso de Pages al servicio de datos no debe dar permisos a los empleados sobre el libro original.

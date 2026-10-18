@@ -26,7 +26,7 @@ El portal descarga `planning-data.json` de su mismo sitio en cada recarga. Power
 ## Configurar la sincronización
 
 1. Abre el libro en Excel Online y ve a **Automatizar > Nuevo script**. Copia el contenido de `scripts/ExportarPlanificacion2027.osts`, guarda el script como `ExportarPlanificacion2027` y ejecútalo una vez para comprobar que existen las cuatro hojas requeridas.
-2. En Power Automate crea un flujo automatizado con SharePoint **Cuando se crea o modifica un archivo (solo propiedades)**. Limita el flujo al archivo `27_PLANNING GENERAL TUA.xlsx`; añade Excel Online (Business) **Ejecutar script** y selecciona `ExportarPlanificacion2027`.
+2. En Power Automate crea un flujo automatizado con OneDrive para la Empresa **Cuando se modifica un archivo** y selecciónalo desde tu OneDrive. Añade Excel Online (Business) **Ejecutar script** y selecciona `ExportarPlanificacion2027` sobre ese mismo archivo.
 3. Añade una petición HTTP `GET` a `https://api.github.com/repos/FJR1991/portal-turnos-tua-2027/contents/planning-data.json?ref=main`. Usa `Accept: application/vnd.github+json`, `X-GitHub-Api-Version: 2022-11-28` y `Authorization: Bearer <token>` para obtener el `sha` actual del archivo.
 4. Si cambió el resultado del script, añade una petición `PUT` a `https://api.github.com/repos/FJR1991/portal-turnos-tua-2027/contents/planning-data.json` con este cuerpo. Sustituye las referencias `Run_script` y `Get_file` por los nombres internos de las acciones de tu flujo:
 

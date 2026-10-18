@@ -1,4 +1,4 @@
 window.TUA2027_DATA_SOURCE = {
-  provider: "google-apps-script",
+  provider: "microsoft",
   endpoint: ""
 };

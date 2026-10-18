@@ -19,7 +19,7 @@ El portal es estrictamente de consulta: no ofrece controles para abrir el Excel 
 
 La lista de personas se reconstruye desde los encabezados de `PERSONAL 27`; la de vehículos, desde `VEHICULOS`; y la de proveedores, desde `PETICIONES MATERIAL`. No son listas fijas en el portal: las altas, bajas y cambios del libro se reflejan en la siguiente carga de datos.
 
-La URL del servicio se configura en `data-source.js`, no en la interfaz. Actualmente está vacía porque aún no se ha conectado la hoja definitiva de 2027.
+La URL del servicio se configura en `data-source.js`, no en la interfaz. El proveedor previsto ahora es Microsoft 365, pero el endpoint está vacío: el enlace de uso compartido recibido requiere iniciar sesión y no es una URL de API que GitHub Pages pueda consultar directamente.
 
 El endpoint debe responder JSONP, aceptar `year=2027`, `callback` y un parámetro de caché, y devolver este contrato:
 
@@ -35,11 +35,11 @@ callback({
 });
 ```
 
-El servicio debe leer el libro privado del lado servidor y exponer solo una operación de lectura. No debe ofrecer rutas ni permisos de escritura. No se deben incluir credenciales, secretos ni el archivo Excel en este repositorio. Para Google, el endpoint puede ser un Google Apps Script que lea como propietario y devuelva los datos necesarios sin compartir el libro con los empleados. Si la empresa migra a Microsoft 365, un servicio intermedio con Microsoft Graph puede usar permisos de lectura y devolver el mismo contrato; el portal no necesitaría cambiar sus vistas.
+El servicio debe leer el libro privado del lado servidor y exponer solo una operación de lectura. No debe ofrecer rutas ni permisos de escritura. No se deben incluir credenciales, enlaces de uso compartido ni el archivo Excel en este repositorio. Para Microsoft 365, se necesita un servicio intermedio autenticado con Microsoft Graph que lea el libro con permisos de solo lectura y devuelva los datos necesarios; el portal consumirá ese endpoint y no necesitará cambiar sus vistas.
 
 Todos los empleados pueden consultar desde el portal los turnos de toda la plantilla. El navegador recibe los datos necesarios para mostrarlos, pero ni el portal ni el endpoint deben ofrecer operaciones para modificarlos.
 
-La configuración actual usa el proveedor `google-apps-script`. Para la futura migración se podrá cambiar `provider` y `endpoint` en `data-source.js` al servicio Microsoft compatible.
+La configuración actual ya indica `provider: "microsoft"`. Para activar la sincronización falta desplegar el servicio de lectura y configurar su URL en `endpoint`.
 
 ## Publicar
 

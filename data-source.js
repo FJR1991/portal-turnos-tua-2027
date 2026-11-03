@@ -1,5 +1,5 @@
 window.TUA2027_DATA_SOURCE = {
   provider: "google-sheets",
-  spreadsheetId: "1QgB04c3fK0v-TrpINP0Sg9_XVE2IV1W2",
+  spreadsheetId: "1Av_0WGdVsFpOoC8faFQg28c7usJHsxmSlf3JJY_Y21Y",
   endpoint: "./planning-data.json"
 };

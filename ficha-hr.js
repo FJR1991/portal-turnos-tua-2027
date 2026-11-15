@@ -8,6 +8,8 @@
   "use strict";
 
   var TEMPLATE_URL = "./plantilla-hr.xlsx";
+  // SHA-256 de la contraseña para generar fichas (no se guarda en claro)
+  var PASSWORD_SHA256 = "ce512dbba6d0ce6c832884ba56d555db8f67670d667b56549037deadf0499677";
   var SHEET = "xl/worksheets/sheet1.xml";
   var SHEET_RELS = "xl/worksheets/_rels/sheet1.xml.rels";
   var DAYS = ["domingo", "lunes", "martes", "miércoles", "jueves", "viernes", "sábado"];
@@ -160,6 +162,13 @@
   }
   function esc(v) { return root.escapeHtml ? root.escapeHtml(str(v)) : xml(str(v)); }
 
+  function sha256Hex(text) {
+    if (!root.crypto || !root.crypto.subtle) return Promise.reject(new Error("Este navegador no permite comprobar la contraseña."));
+    return root.crypto.subtle.digest("SHA-256", new TextEncoder().encode(text)).then(function (buf) {
+      return Array.prototype.map.call(new Uint8Array(buf), function (b) { return ("0" + b.toString(16)).slice(-2); }).join("");
+    });
+  }
+
   function isStatus(v) { return /reserva|firme|tbc|confirm|opci[oó]n|pendiente|\?/i.test(str(v)); }
 
   // Separa los eventos de un día: cada columna de PRODUCCION 27 es un evento distinto
@@ -211,6 +220,8 @@
       '<div class="hr-note" id="hrStatus"></div>' +
       '<div id="hrLists"></div>' +
       '<div class="hr-note">Revisa los datos: puedes cambiar cualquier campo antes de descargar. El resto se completa en el Excel.</div>' +
+      '<h4>Contraseña</h4><input class="field" type="password" id="hrPassword" autocomplete="off" style="width:100%" placeholder="Necesaria para generar la ficha">' +
+      '<div class="hr-note" id="hrPassError" style="color:var(--coral)"></div>' +
       '<div class="hr-actions"><button class="button" data-hr="cancel">Cancelar</button><button class="button primary" data-hr="go">Descargar Excel</button></div></div>';
     document.body.appendChild(wrap);
     var $ = function (sel) { return wrap.querySelector(sel); };
@@ -237,6 +248,7 @@
     render();
     if ($("#hrEvent")) $("#hrEvent").addEventListener("change", render);
 
+    $("#hrPassword").addEventListener("keydown", function (e) { if (e.key === "Enter") $('[data-hr="go"]').click(); });
     function close() { if (wrap.parentNode) wrap.parentNode.removeChild(wrap); }
     wrap.addEventListener("click", function (e) { if (e.target === wrap) close(); });
     $('[data-hr="cancel"]').addEventListener("click", close);
@@ -252,8 +264,21 @@
         staff: picked("staff", staff).map(function (x) { return x.name; }),
         vehicles: picked("veh", vehicles)
       };
-      btn.disabled = true; btn.textContent = "Generando…";
-      generate(data).then(close).catch(function (err) {
+      btn.disabled = true; btn.textContent = "Comprobando…";
+      $("#hrPassError").textContent = "";
+      sha256Hex($("#hrPassword").value).then(function (hash) {
+        if (hash !== PASSWORD_SHA256) {
+          var err = new Error("Contraseña incorrecta."); err.password = true; throw err;
+        }
+        btn.textContent = "Generando…";
+        return generate(data);
+      }).then(close).catch(function (err) {
+        if (err.password) {
+          $("#hrPassError").textContent = err.message;
+          $("#hrPassword").value = ""; $("#hrPassword").focus();
+          btn.disabled = false; btn.textContent = "Descargar Excel";
+          return;
+        }
         alert("No se pudo generar la ficha: " + err.message);
         btn.disabled = false; btn.textContent = "Descargar Excel";
       });
@@ -273,6 +298,20 @@
         document.body.appendChild(a); a.click();
         setTimeout(function () { URL.revokeObjectURL(a.href); a.remove(); }, 1000);
       });
+  }
+
+  // En móvil el detalle queda debajo de toda la agenda: al tocar un día, bajar hasta él
+  if (typeof document !== "undefined") {
+    document.addEventListener("click", function (e) {
+      var target = e.target.closest && e.target.closest("[data-event-date], #productionCalendar [data-calendar-date]");
+      if (!target || !root.matchMedia || !root.matchMedia("(max-width: 620px)").matches) return;
+      setTimeout(function () {
+        var panel = document.querySelector("#view-produccion .detail-panel");
+        if (!panel) return;
+        panel.style.scrollMarginTop = "72px";
+        panel.scrollIntoView({ behavior: "smooth", block: "start" });
+      }, 50);
+    });
   }
 
   var api = { open: open, fillWorkbook: fillWorkbook, fileName: fileName, extractPlate: extractPlate, longDate: longDate };

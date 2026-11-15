@@ -69,7 +69,7 @@
   function fillWorkbook(zip, data) {
     return Promise.all([zip.file(SHEET).async("string"), zip.file(SHEET_RELS).async("string")]).then(function (parts) {
       var s = parts[0], rels = parts[1];
-      var lugar = [data.space, data.poblacion, data.provincia].filter(str).join(", ");
+      var lugar = [data.space, data.poblacion, data.provincia].filter(function (v, i, all) { return str(v) && !all.slice(0, i).some(function (p) { return norm(p).indexOf(norm(v)) >= 0; }); }).join(", ");
 
       s = setCell(s, CELLS.fecha, data.date ? longDate(data.date) : "");
       s = setCell(s, CELLS.llegada, data.llegada);
@@ -160,47 +160,95 @@
   }
   function esc(v) { return root.escapeHtml ? root.escapeHtml(str(v)) : xml(str(v)); }
 
+  function isStatus(v) { return /reserva|firme|tbc|confirm|opci[oó]n|pendiente|\?/i.test(str(v)); }
+
+  // Separa los eventos de un día: cada columna de PRODUCCION 27 es un evento distinto
+  function dayEvents(date, fallback) {
+    var rows = (root.workbookSheets || {})["PRODUCCION 27"] || [], toISO = root.dateISO, out = [];
+    if (toISO) {
+      for (var r = 2; r < rows.length; r++) {
+        if (toISO(rows[r] && rows[r][0]) !== date) continue;
+        var width = Math.max((rows[r] || []).length, (rows[r + 1] || []).length, (rows[r + 2] || []).length);
+        for (var c = 2; c < width; c++) {
+          var cell = function (i) { var v = str((rows[i] || [])[c]); return v === "." ? "" : v; };
+          var e = { event: cell(r), status: cell(r + 1), space: cell(r + 2) };
+          if (e.event || e.status || e.space) out.push(e);
+        }
+        break;
+      }
+    }
+    if (!out.length && fallback) out.push({ event: fallback.event, status: fallback.client, space: fallback.space });
+    return out;
+  }
+
+  function splitPlace(space) {
+    var m = str(space).match(/^(.*?)\s*\(([^)]+)\)\s*$/);
+    return m ? { poblacion: m[1], provincia: m[2] } : { poblacion: str(space), provincia: "" };
+  }
+
   function open(date) {
     var model = root.model || {};
-    var ev = (model.events || []).find(function (x) { return x.date === date; });
-    if (!ev) return;
+    var base = (model.events || []).find(function (x) { return x.date === date; });
+    if (!base) return;
     if (!root.JSZip) { alert("No se pudo cargar el generador de Excel. Revisa la conexión y recarga la página."); return; }
     injectStyles();
 
-    var tokens = eventTokens(ev);
-    var staff = preselect(dayAssignments(model.workers, date), tokens);
+    var events = dayEvents(date, base);
     var workerNames = (model.workers || []).map(function (w) { return w.name; });
-    var vehicles = preselect(dayAssignments(model.vehicles, date), tokens).map(function (v) {
-      var driver = workerNames.find(function (n) { return norm(n) && norm(v.value).indexOf(norm(n)) >= 0; }) || "";
-      v.plate = extractPlate(v.name); v.driver = driver; return v;
-    });
+    var staff = [], vehicles = [];
 
     var wrap = document.createElement("div");
     wrap.className = "hr-backdrop";
     wrap.innerHTML = '<div class="hr-modal" role="dialog" aria-modal="true" aria-label="Generar ficha HR">' +
-      "<h3>Ficha HR · " + esc(ev.event || "Evento") + '</h3><div class="muted">' + esc(longDate(date)) + (ev.client ? " · " + esc(ev.client) : "") + (ev.space ? " · " + esc(ev.space) : "") + "</div>" +
+      '<h3>Ficha HR</h3><div class="muted">' + esc(longDate(date)) + "</div>" +
+      (events.length > 1 ? '<h4>Evento del día</h4><select class="field" id="hrEvent" style="width:100%">' +
+        events.map(function (e, i) { return '<option value="' + i + '">' + esc([e.event, e.space].filter(str).join(" · ") || "Evento " + (i + 1)) + "</option>"; }).join("") + "</select>" : "") +
       '<h4>Datos del evento</h4><div class="hr-grid">' +
+      '<label style="grid-column:1/-1">Actividad o evento<input class="field" id="hrEvento"></label>' +
+      '<label>Recinto<input class="field" id="hrRecinto"></label><label>Cliente<input class="field" id="hrCliente"></label>' +
       '<label>Población<input class="field" id="hrPoblacion"></label><label>Provincia<input class="field" id="hrProvincia"></label>' +
       '<label style="grid-column:1/-1">Llegada camiones / comienzo montaje<input class="field" id="hrLlegada" placeholder="Ej. 08:00"></label></div>' +
-      "<h4>Personal TUA (el primero marcado será el responsable)</h4>" + checklist(staff, "staff") +
-      "<h4>Vehículos</h4>" + checklist(vehicles, "veh", function (v) { return v.driver ? " · conductor: " + esc(v.driver) : ""; }) +
-      '<div class="hr-note">Se rellenan contactos del personal, vehículos, enlaces de mapas y meteorología. El resto se completa en el Excel.</div>' +
+      '<div class="hr-note" id="hrStatus"></div>' +
+      '<div id="hrLists"></div>' +
+      '<div class="hr-note">Revisa los datos: puedes cambiar cualquier campo antes de descargar. El resto se completa en el Excel.</div>' +
       '<div class="hr-actions"><button class="button" data-hr="cancel">Cancelar</button><button class="button primary" data-hr="go">Descargar Excel</button></div></div>';
     document.body.appendChild(wrap);
+    var $ = function (sel) { return wrap.querySelector(sel); };
+
+    function render() {
+      var ev = events[$("#hrEvent") ? Number($("#hrEvent").value) : 0] || {};
+      var place = splitPlace(ev.space);
+      $("#hrEvento").value = ev.event || "";
+      $("#hrRecinto").value = ev.space || "";
+      $("#hrCliente").value = isStatus(ev.status) ? "" : ev.status || "";
+      $("#hrPoblacion").value = place.poblacion;
+      $("#hrProvincia").value = place.provincia;
+      $("#hrStatus").textContent = isStatus(ev.status) ? "Estado en planificación: " + ev.status : "";
+      var tokens = eventTokens({ event: ev.event, space: ev.space });
+      staff = preselect(dayAssignments(model.workers, date), tokens);
+      vehicles = preselect(dayAssignments(model.vehicles, date), tokens).map(function (v) {
+        v.plate = extractPlate(v.name);
+        v.driver = workerNames.find(function (n) { return norm(n) && norm(v.value).indexOf(norm(n)) >= 0; }) || "";
+        return v;
+      });
+      $("#hrLists").innerHTML = "<h4>Personal TUA (el primero marcado será el responsable)</h4>" + checklist(staff, "staff") +
+        "<h4>Vehículos</h4>" + checklist(vehicles, "veh", function (v) { return v.driver ? " · conductor: " + esc(v.driver) : ""; });
+    }
+    render();
+    if ($("#hrEvent")) $("#hrEvent").addEventListener("change", render);
 
     function close() { if (wrap.parentNode) wrap.parentNode.removeChild(wrap); }
     wrap.addEventListener("click", function (e) { if (e.target === wrap) close(); });
-    wrap.querySelector('[data-hr="cancel"]').addEventListener("click", close);
-    wrap.querySelector('[data-hr="go"]').addEventListener("click", function () {
+    $('[data-hr="cancel"]').addEventListener("click", close);
+    $('[data-hr="go"]').addEventListener("click", function () {
       var btn = this;
       var picked = function (attr, list) {
         return Array.prototype.filter.call(wrap.querySelectorAll("[data-" + attr + "]"), function (c) { return c.checked; })
           .map(function (c) { return list[Number(c.getAttribute("data-" + attr))]; });
       };
       var data = {
-        date: date, event: ev.event, client: ev.client, space: ev.space,
-        poblacion: wrap.querySelector("#hrPoblacion").value, provincia: wrap.querySelector("#hrProvincia").value,
-        llegada: wrap.querySelector("#hrLlegada").value,
+        date: date, event: $("#hrEvento").value, client: $("#hrCliente").value, space: $("#hrRecinto").value,
+        poblacion: $("#hrPoblacion").value, provincia: $("#hrProvincia").value, llegada: $("#hrLlegada").value,
         staff: picked("staff", staff).map(function (x) { return x.name; }),
         vehicles: picked("veh", vehicles)
       };

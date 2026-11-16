@@ -122,6 +122,23 @@
   function fillWorkbook(zip, data) {
     return Promise.all([zip.file(SHEET).async("string"), zip.file(SHEET_RELS).async("string"), zip.file(WORKBOOK).async("string")]).then(function (parts) {
       var s = parts[0], rels = parts[1], wbx = parts[2];
+      var V = data.venue || null, vv = function (k) { return V ? str(V[k]) : ""; };
+      if (V) {
+        s = setCell(s, CELLS.recinto, [data.space || vv("NOMBRE RECINTO"), vv("DIRECCIÓN")].filter(str).join(" · "));
+        s = setCell(s, "D14", vv("DIRECCIÓN ACCESO CARGA"));
+        s = setCell(s, "D15", vv("PARKING"));
+        [["D44", "TIPO DE ESPACIO"], ["J44", "AFORO"], ["D45", "TIPO ESCENARIO"], ["J45", "MEDIDAS ESCENARIO"], ["D46", "ESCALERAS"], ["J46", "RAMPAS"],
+         ["D47", "ACCESO CARGA"], ["J47", "PASACABLES"], ["D48", "RIGGING PA"], ["J48", "RIGGING LUCES"], ["D49", "RIGGING VIDEO"], ["J49", "CAÑÓN"],
+         ["D50", "UBICACIÓN CONTROL"], ["J50", "MEDIDAS CONTROL"], ["D51", "OTROS DATOS ESPACIO"],
+         ["D22", "PRODUCCIÓN LOCAL"], ["G22", "TELÉFONO PROD. LOCAL"], ["J22", "EMAIL PROD. LOCAL"],
+         ["D30", "ELÉCTRICO CONTACTO"], ["G30", "TELÉFONO ELÉCTRICO"], ["J30", "EMAIL ELÉCTRICO"]].forEach(function (p) {
+          if (vv(p[1])) s = setCell(s, p[0], vv(p[1]));
+        });
+        ["SONIDO", "ILUMINACIÓN", "VIDEO", "MOTORES", "CONTROL", "CAÑONES", "PARKING BUS"].forEach(function (t, i) {
+          if (vv("TOMA " + t)) s = setCell(s, "D" + (55 + i), vv("TOMA " + t));
+          if (vv("POSICIÓN TOMA " + t)) s = setCell(s, "I" + (55 + i), vv("POSICIÓN TOMA " + t));
+        });
+      }
       var staff = (data.staff || []).filter(str);
       var vehicles = data.vehicles || [];
       // una fila por persona y por vehículo: si no caben, se añaden filas a la plantilla
@@ -140,11 +157,11 @@
       s = setCell(s, CELLS.fecha, data.date ? longDate(data.date) : "");
       s = setCell(s, CELLS.llegada, data.llegada);
       s = setCell(s, CELLS.evento, data.event);
-      s = setCell(s, CELLS.recinto, data.space);
+      if (!data.venue) s = setCell(s, CELLS.recinto, data.space);
       s = setCell(s, CELLS.poblacion, data.poblacion);
       s = setCell(s, CELLS.provincia, data.provincia);
       s = setCell(s, CELLS.cliente, data.client);
-      CELLS.limpiar.forEach(function (ref) { s = setCell(s, ref, ""); });
+      if (!(V && vv("TELÉFONO PROD. LOCAL"))) CELLS.limpiar.forEach(function (ref) { s = setCell(s, ref, ""); });
 
       pRefs.forEach(function (ref, i) { s = setCell(s, ref, staff[i] || ""); });
 
@@ -155,12 +172,13 @@
         s = setCell(s, "H" + row, v.name);
       });
 
-      if (lugar) {
-        rels = setLink(rels, LINKS.recinto, mapsUrl(lugar));
-        rels = setLink(rels, LINKS.acceso, mapsUrl(lugar));
-        rels = setLink(rels, LINKS.parking, mapsUrl(lugar));
-        rels = setLink(rels, LINKS.hotel, mapsUrl("hoteles cerca de " + lugar));
+      var linkRecinto = vv("MAPS RECINTO") || vv("MAPS ACCESO CARGA") || (lugar ? mapsUrl(lugar) : "");
+      if (linkRecinto) {
+        rels = setLink(rels, LINKS.recinto, linkRecinto);
+        rels = setLink(rels, LINKS.acceso, vv("MAPS ACCESO CARGA") || linkRecinto);
+        rels = setLink(rels, LINKS.parking, vv("MAPS PARKING") || linkRecinto);
       }
+      if (lugar) rels = setLink(rels, LINKS.hotel, mapsUrl("hoteles cerca de " + lugar));
       rels = setLink(rels, LINKS.meteo, meteoUrl(data.poblacion, lugar));
 
       zip.file(SHEET, s);
@@ -255,6 +273,71 @@
     return m ? { poblacion: m[1], provincia: m[2] } : { poblacion: str(space), provincia: "" };
   }
 
+  /* ---------- Listado de recintos (Google Sheet compartido de solo lectura) ---------- */
+  var RECINTOS_ID_DEFAULT = "1XfgjgyqQp2dE2haA1amK6CQ1kSsfB13PS3MGM0Vk_2A";
+  var recintosPromise = null;
+  function recintosId() { var c = root.TUA2027_DATA_SOURCE || {}; return c.recintosId || RECINTOS_ID_DEFAULT; }
+
+  function loadRecintos() {
+    if (recintosPromise) return recintosPromise;
+    recintosPromise = new Promise(function (resolve, reject) {
+      var cb = "tuaRecintos_" + Date.now(), script = document.createElement("script");
+      var timer = setTimeout(function () { done(); reject(new Error("tiempo de espera")); }, 20000);
+      function done() { clearTimeout(timer); delete root[cb]; if (script.parentNode) script.parentNode.removeChild(script); }
+      root[cb] = function (payload) {
+        done();
+        if (!payload || payload.status !== "ok" || !payload.table) { reject(new Error("no se pudo leer")); return; }
+        var cols = (payload.table.cols || []).map(function (c) { return str(c.label); });
+        var list = (payload.table.rows || []).map(function (row) {
+          var o = {};
+          cols.forEach(function (h, i) { var c = row && row.c && row.c[i]; if (h) o[h] = c ? str(c.v != null ? c.v : c.f) : ""; });
+          return o;
+        }).filter(function (o) { return str(o["NOMBRE RECINTO"]); });
+        resolve(list);
+      };
+      script.onerror = function () { done(); reject(new Error("bloqueado")); };
+      script.src = "https://docs.google.com/spreadsheets/d/" + encodeURIComponent(recintosId()) + "/gviz/tq?sheet=RECINTOS&headers=1&tqx=" +
+        encodeURIComponent("out:json;responseHandler:" + cb) + "&_=" + Date.now();
+      document.head.appendChild(script);
+    });
+    recintosPromise.catch(function () { recintosPromise = null; });
+    return recintosPromise;
+  }
+
+  function venueLabel(v) { return str(v["NOMBRE RECINTO"]) + (str(v["POBLACIÓN"]) ? " — " + str(v["POBLACIÓN"]) : ""); }
+
+  function bestVenue(list, ev) {
+    var STOP = { "de": 1, "del": 1, "la": 1, "el": 1, "los": 1, "las": 1, "y": 1, "en": 1, "municipal": 1 };
+    var words = function (t) { return norm(t).split(/[^a-z0-9]+/).filter(function (w) { return w.length >= 3 && !STOP[w]; }); };
+    var evWords = words([ev.event, ev.space].join(" ")), evText = " " + norm([ev.event, ev.space].join(" ")) + " ";
+    var best = null, bestScore = 0, byTown = {};
+    list.forEach(function (v) {
+      var town = norm(v["POBLACIÓN"]);
+      if (town && evText.indexOf(" " + town + " ") >= 0) byTown[town] = (byTown[town] || 0) + 1;
+    });
+    list.forEach(function (v) {
+      var vw = words([v["NOMBRE RECINTO"], v["OTROS NOMBRES"]].join(" ")), town = norm(v["POBLACIÓN"]);
+      var hits = vw.filter(function (w, i) { return vw.indexOf(w) === i && evWords.indexOf(w) >= 0 && w !== town; }).length;
+      var townHit = town && evText.indexOf(" " + town + " ") >= 0;
+      var score = hits * 2 + (townHit ? 1 : 0) + (townHit && byTown[town] === 1 ? 1 : 0);
+      if (score > bestScore || (score === bestScore && best && Number(v["Nº HR"] || 0) > Number(best["Nº HR"] || 0))) { best = v; bestScore = score; }
+    });
+    return bestScore >= 2 ? best : null;
+  }
+
+  function venueSummary(v) {
+    if (!v) return "";
+    var parts = [], links = ["MAPS RECINTO", "MAPS ACCESO CARGA", "MAPS PARKING"].filter(function (k) { return str(v[k]); }).length;
+    if (str(v["DIRECCIÓN"]) || str(v["DIRECCIÓN ACCESO CARGA"])) parts.push("dirección");
+    if (links) parts.push(links + (links > 1 ? " enlaces" : " enlace") + " de Maps");
+    if (["AFORO", "TIPO ESCENARIO", "MEDIDAS ESCENARIO", "ACCESO CARGA", "UBICACIÓN CONTROL"].some(function (k) { return str(v[k]); })) parts.push("datos del espacio");
+    var tomas = ["TOMA SONIDO", "TOMA ILUMINACIÓN", "TOMA VIDEO", "TOMA MOTORES", "TOMA CONTROL", "TOMA CAÑONES", "TOMA PARKING BUS"].filter(function (k) { return str(v[k]); }).length;
+    if (tomas) parts.push(tomas + (tomas > 1 ? " tomas" : " toma") + " eléctricas");
+    if (str(v["PRODUCCIÓN LOCAL"])) parts.push("producción local");
+    if (str(v["ELÉCTRICO CONTACTO"])) parts.push("eléctrico");
+    return parts.length ? "Se rellenará del listado: " + parts.join(", ") + ". (Tomas y contactos son del último evento allí: revísalos.)" : "Este recinto no tiene más datos en el listado.";
+  }
+
   function open(date) {
     var model = root.model || {};
     var base = (model.events || []).find(function (x) { return x.date === date; });
@@ -264,7 +347,7 @@
 
     var events = dayEvents(date, base);
     var workerNames = (model.workers || []).map(function (w) { return w.name; });
-    var staff = [], vehicles = [];
+    var staff = [], vehicles = [], venues = [], venue = null;
 
     var wrap = document.createElement("div");
     wrap.className = "hr-backdrop";
@@ -274,7 +357,9 @@
         events.map(function (e, i) { return '<option value="' + i + '">' + esc([e.event, e.space].filter(str).join(" · ") || "Evento " + (i + 1)) + "</option>"; }).join("") + "</select>" : "") +
       '<h4>Datos del evento</h4><div class="hr-grid">' +
       '<label style="grid-column:1/-1">Actividad o evento<input class="field" id="hrEvento"></label>' +
-      '<label>Recinto<input class="field" id="hrRecinto"></label><label>Cliente<input class="field" id="hrCliente"></label>' +
+      '<label style="grid-column:1/-1">Recinto del listado<input class="field" id="hrVenue" list="hrVenues" placeholder="Cargando recintos…" autocomplete="off"></label><datalist id="hrVenues"></datalist>' +
+      '<div class="hr-note" id="hrVenueInfo" style="grid-column:1/-1;margin-top:-2px"></div>' +
+      '<label>Recinto (texto en la ficha)<input class="field" id="hrRecinto"></label><label>Cliente<input class="field" id="hrCliente"></label>' +
       '<label>Población<input class="field" id="hrPoblacion"></label><label>Provincia<input class="field" id="hrProvincia"></label>' +
       '<label style="grid-column:1/-1">Llegada camiones / comienzo montaje<input class="field" id="hrLlegada" placeholder="Ej. 08:00"></label></div>' +
       '<div class="hr-note" id="hrStatus"></div>' +
@@ -286,8 +371,34 @@
     document.body.appendChild(wrap);
     var $ = function (sel) { return wrap.querySelector(sel); };
 
+    function setVenue(v) {
+      venue = v || null;
+      $("#hrVenue").value = venue ? venueLabel(venue) : "";
+      $("#hrVenueInfo").textContent = venue ? venueSummary(venue) : (venues.length ? "Sin recinto del listado: elige uno o deja el texto del planning." : "");
+      if (venue) {
+        $("#hrRecinto").value = str(venue["NOMBRE RECINTO"]);
+        if (str(venue["POBLACIÓN"])) $("#hrPoblacion").value = str(venue["POBLACIÓN"]);
+        if (str(venue["PROVINCIA"])) $("#hrProvincia").value = str(venue["PROVINCIA"]);
+      }
+    }
+    function currentEvent() { return events[$("#hrEvent") ? Number($("#hrEvent").value) : 0] || {}; }
+    loadRecintos().then(function (list) {
+      venues = list;
+      $("#hrVenues").innerHTML = list.map(function (v) { return '<option value="' + esc(venueLabel(v)) + '"></option>'; }).join("");
+      $("#hrVenue").placeholder = "Escribe para buscar entre " + list.length + " recintos";
+      setVenue(bestVenue(list, currentEvent()));
+    }).catch(function () {
+      $("#hrVenue").placeholder = "No se pudo cargar el listado de recintos";
+      $("#hrVenue").disabled = true;
+    });
+    $("#hrVenue").addEventListener("change", function () {
+      var val = $("#hrVenue").value, v = venues.find(function (x) { return venueLabel(x) === val; });
+      if (v) setVenue(v);
+      else if (!str(val)) { venue = null; $("#hrVenueInfo").textContent = ""; render(); }
+    });
+
     function render() {
-      var ev = events[$("#hrEvent") ? Number($("#hrEvent").value) : 0] || {};
+      var ev = currentEvent();
       var place = splitPlace(ev.space);
       $("#hrEvento").value = ev.event || "";
       $("#hrRecinto").value = ev.space || "";
@@ -302,6 +413,7 @@
         v.driver = workerNames.find(function (n) { return norm(n) && norm(v.value).indexOf(norm(n)) >= 0; }) || "";
         return v;
       });
+      if (venues.length) setVenue(bestVenue(venues, ev));
       $("#hrLists").innerHTML = "<h4>Personal TUA (el primero marcado será el responsable)</h4>" + checklist(staff, "staff") +
         "<h4>Vehículos</h4>" + checklist(vehicles, "veh", function (v) { return v.driver ? " · conductor: " + esc(v.driver) : ""; });
     }
@@ -322,7 +434,8 @@
         date: date, event: $("#hrEvento").value, client: $("#hrCliente").value, space: $("#hrRecinto").value,
         poblacion: $("#hrPoblacion").value, provincia: $("#hrProvincia").value, llegada: $("#hrLlegada").value,
         staff: picked("staff", staff).map(function (x) { return x.name; }),
-        vehicles: picked("veh", vehicles)
+        vehicles: picked("veh", vehicles),
+        venue: venue
       };
       btn.disabled = true; btn.textContent = "Comprobando…";
       $("#hrPassError").textContent = "";

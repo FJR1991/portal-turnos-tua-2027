@@ -390,7 +390,7 @@
     return parts.length ? "Se rellenará del listado: " + parts.join(", ") + ". (Tomas y contactos son del último evento allí: revísalos.)" : "Este recinto no tiene más datos en el listado.";
   }
 
-  function open(date) {
+  function open(date, eventIndex) {
     var model = root.model || {};
     var base = (model.events || []).find(function (x) { return x.date === date; });
     if (!base) return;
@@ -490,8 +490,8 @@
       $("#hrLists").innerHTML = "<h4>Personal TUA (el primero marcado será el responsable)</h4>" + checklist(staff, "staff") +
         "<h4>Vehículos</h4>" + checklist(vehicles, "veh", function (v) { return v.driver ? " · conductor: " + esc(v.driver) : ""; });
     }
+    if ($("#hrEvent")) { if (eventIndex > 0 && eventIndex < events.length) $("#hrEvent").value = String(eventIndex); $("#hrEvent").addEventListener("change", render); }
     render();
-    if ($("#hrEvent")) $("#hrEvent").addEventListener("change", render);
 
     $("#hrPassword").addEventListener("keydown", function (e) { if (e.key === "Enter") $('[data-hr="go"]').click(); });
     function close() { if (wrap.parentNode) wrap.parentNode.removeChild(wrap); }

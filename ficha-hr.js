@@ -326,6 +326,20 @@
   function loadPersonal(key) {
     var url = personalUrl();
     if (!url) return Promise.reject(new Error("El listado de personal aún no está conectado."));
+    // Primero sin cookies de Google (evita el fallo cuando hay varias cuentas de Google abiertas);
+    // si el navegador no lo permite, se intenta por JSONP.
+    if (root.fetch) {
+      return root.fetch(url + (url.indexOf("?") >= 0 ? "&" : "?") + "key=" + encodeURIComponent(key) + "&_=" + Date.now(), { credentials: "omit", cache: "no-store", redirect: "follow" })
+        .then(function (r) { if (!r.ok) throw new Error("http " + r.status); return r.json(); })
+        .then(function (payload) {
+          if (!payload || !payload.ok) { var e = new Error((payload && payload.error) || "Respuesta no válida del listado de personal."); e.final = true; throw e; }
+          return payload;
+        })
+        .catch(function (err) { if (err && err.final) throw err; return loadPersonalJsonp(url, key); });
+    }
+    return loadPersonalJsonp(url, key);
+  }
+  function loadPersonalJsonp(url, key) {
     return new Promise(function (resolve, reject) {
       var cb = "tuaPersonal_" + Date.now(), script = document.createElement("script");
       var timer = setTimeout(function () { done(); reject(new Error("El listado de personal no responde.")); }, 25000);

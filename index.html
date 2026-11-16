@@ -2,6 +2,7 @@
 <html lang="es">
 <head>
   <meta charset="utf-8">
+  <script>/* Comprueba si hay versión nueva del portal y recarga sin caché */(function(){var BUILD="202611161159";try{fetch("./version.txt?_="+Date.now(),{cache:"no-store"}).then(function(r){return r.ok?r.text():""}).then(function(v){v=String(v||"").trim();if(!v||v===BUILD)return;var q=new URLSearchParams(location.search);if(q.get("v")===v)return;q.set("v",v);location.replace(location.pathname+"?"+q.toString()+location.hash)}).catch(function(){})}catch(e){}})();</script>
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="theme-color" content="#102d28">
   <title>Planificación TUA 2027</title>

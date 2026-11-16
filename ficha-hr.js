@@ -130,8 +130,7 @@
         [["D44", "TIPO DE ESPACIO"], ["J44", "AFORO"], ["D45", "TIPO ESCENARIO"], ["J45", "MEDIDAS ESCENARIO"], ["D46", "ESCALERAS"], ["J46", "RAMPAS"],
          ["D47", "ACCESO CARGA"], ["J47", "PASACABLES"], ["D48", "RIGGING PA"], ["J48", "RIGGING LUCES"], ["D49", "RIGGING VIDEO"], ["J49", "CAÑÓN"],
          ["D50", "UBICACIÓN CONTROL"], ["J50", "MEDIDAS CONTROL"], ["D51", "OTROS DATOS ESPACIO"],
-         ["D22", "PRODUCCIÓN LOCAL"], ["G22", "TELÉFONO PROD. LOCAL"], ["J22", "EMAIL PROD. LOCAL"],
-         ["D30", "ELÉCTRICO CONTACTO"], ["G30", "TELÉFONO ELÉCTRICO"], ["J30", "EMAIL ELÉCTRICO"]].forEach(function (p) {
+                  ["D30", "ELÉCTRICO CONTACTO"], ["G30", "TELÉFONO ELÉCTRICO"], ["J30", "EMAIL ELÉCTRICO"]].forEach(function (p) {
           if (vv(p[1])) s = setCell(s, p[0], vv(p[1]));
         });
         ["SONIDO", "ILUMINACIÓN", "VIDEO", "MOTORES", "CONTROL", "CAÑONES", "PARKING BUS"].forEach(function (t, i) {
@@ -161,7 +160,8 @@
       s = setCell(s, CELLS.poblacion, data.poblacion);
       s = setCell(s, CELLS.provincia, data.provincia);
       s = setCell(s, CELLS.cliente, data.client);
-      if (!(V && vv("TELÉFONO PROD. LOCAL"))) CELLS.limpiar.forEach(function (ref) { s = setCell(s, ref, ""); });
+      // Producción local se deja siempre en blanco (los contactos cambian)
+      ["D22", "G22", "J22"].forEach(function (ref) { s = setCell(s, ref, ""); });
 
       var P = data.people || null;
       var byPlan = P ? indexBy(P.personal, "NOMBRE EN PLANNING") : {}, byFull = P ? indexBy(P.personal, "NOMBRE Y APELLIDOS") : {};

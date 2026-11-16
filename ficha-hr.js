@@ -163,13 +163,30 @@
       s = setCell(s, CELLS.cliente, data.client);
       if (!(V && vv("TELÉFONO PROD. LOCAL"))) CELLS.limpiar.forEach(function (ref) { s = setCell(s, ref, ""); });
 
-      pRefs.forEach(function (ref, i) { s = setCell(s, ref, staff[i] || ""); });
+      var P = data.people || null;
+      var byPlan = P ? indexBy(P.personal, "NOMBRE EN PLANNING") : {}, byFull = P ? indexBy(P.personal, "NOMBRE Y APELLIDOS") : {};
+      var person = function (name) { return byPlan[nameKey(name)] || byFull[nameKey(name)] || null; };
+      pRefs.forEach(function (ref, i) {
+        var row = ref.replace(/\D/g, ""), who = staff[i] || "", rec = who ? person(who) : null;
+        s = setCell(s, ref, rec ? (str(rec["NOMBRE Y APELLIDOS"]) || who) : who);
+        if (rec) {
+          if (str(rec["TELÉFONO"])) s = setCell(s, "G" + row, rec["TELÉFONO"]);
+          if (str(rec["EMAIL"])) s = setCell(s, "J" + row, rec["EMAIL"]);
+          if (str(rec["DNI"])) s = setCell(s, "O" + row, "DNI " + str(rec["DNI"]));
+        }
+      });
+      var vByPlan = P ? indexBy(P.vehiculos, "NOMBRE EN PLANNING") : {};
 
       vRows.forEach(function (row, i) {
-        var v = vehicles[i] || {};
-        s = setCell(s, "B" + row, v.driver);
-        s = setCell(s, "E" + row, v.plate);
-        s = setCell(s, "H" + row, v.name);
+        var v = vehicles[i] || {}, rec = v.name ? vByPlan[nameKey(v.name)] : null;
+        var driverName = v.driver || (rec ? str(rec["CONDUCTOR HABITUAL"]) : "");
+        var drv = driverName ? person(driverName) : null;
+        s = setCell(s, "B" + row, drv ? (str(drv["NOMBRE Y APELLIDOS"]) || driverName) : driverName);
+        s = setCell(s, "E" + row, (rec && str(rec["MATRÍCULA"])) || v.plate);
+        if (rec && str(rec["REMOLQUE"])) s = setCell(s, "F" + row, rec["REMOLQUE"]);
+        var tel = (drv && str(drv["TELÉFONO"])) || (rec && str(rec["TELÉFONO CONDUCTOR"])) || "";
+        if (tel) s = setCell(s, "G" + row, tel);
+        s = setCell(s, "H" + row, [v.name, rec ? str(rec["CARACTERÍSTICAS"]) : ""].filter(str).join(" · "));
       });
 
       var linkRecinto = vv("MAPS RECINTO") || vv("MAPS ACCESO CARGA") || (lugar ? mapsUrl(lugar) : "");
@@ -302,6 +319,32 @@
     });
     recintosPromise.catch(function () { recintosPromise = null; });
     return recintosPromise;
+  }
+
+  /* ---------- Listado de personal (Sheet privado, vía Apps Script con contraseña) ---------- */
+  function personalUrl() { var c = root.TUA2027_DATA_SOURCE || {}; return str(c.personalUrl); }
+  function loadPersonal(key) {
+    var url = personalUrl();
+    if (!url) return Promise.reject(new Error("El listado de personal aún no está conectado."));
+    return new Promise(function (resolve, reject) {
+      var cb = "tuaPersonal_" + Date.now(), script = document.createElement("script");
+      var timer = setTimeout(function () { done(); reject(new Error("El listado de personal no responde.")); }, 25000);
+      function done() { clearTimeout(timer); delete root[cb]; if (script.parentNode) script.parentNode.removeChild(script); }
+      root[cb] = function (payload) {
+        done();
+        if (!payload || !payload.ok) { reject(new Error((payload && payload.error) || "Respuesta no válida del listado de personal.")); return; }
+        resolve(payload);
+      };
+      script.onerror = function () { done(); reject(new Error("No se pudo conectar con el listado de personal.")); };
+      script.src = url + (url.indexOf("?") >= 0 ? "&" : "?") + "key=" + encodeURIComponent(key) + "&callback=" + cb + "&_=" + Date.now();
+      document.head.appendChild(script);
+    });
+  }
+  function nameKey(v) { return norm(v).replace(/[^a-z0-9]+/g, " ").trim(); }
+  function indexBy(list, field) {
+    var idx = {};
+    (list || []).forEach(function (o) { var k = nameKey(o[field]); if (k && !idx[k]) idx[k] = o; });
+    return idx;
   }
 
   function venueLabel(v) { return str(v["NOMBRE RECINTO"]) + (str(v["POBLACIÓN"]) ? " — " + str(v["POBLACIÓN"]) : ""); }
@@ -473,9 +516,13 @@
         if (hash !== PASSWORD_SHA256) {
           var err = new Error("Contraseña incorrecta."); err.password = true; throw err;
         }
-        btn.textContent = "Generando…";
-        return generate(data);
+        if (!personalUrl()) { btn.textContent = "Generando…"; return generate(data); }
+        btn.textContent = "Cargando personal…";
+        return loadPersonal($("#hrPassword").value).then(function (people) { data.people = people; }, function (err) {
+          if (!confirm(err.message + "\n\n¿Generar la ficha con los nombres del planning?")) { var e2 = new Error("cancelado"); e2.cancel = true; throw e2; }
+        }).then(function () { btn.textContent = "Generando…"; return generate(data); });
       }).then(close).catch(function (err) {
+        if (err.cancel) { btn.disabled = false; btn.textContent = "Descargar Excel"; return; }
         if (err.password) {
           $("#hrPassError").textContent = err.message;
           $("#hrPassword").value = ""; $("#hrPassword").focus();

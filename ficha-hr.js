@@ -12,6 +12,7 @@
   var PASSWORD_SHA256 = "ce512dbba6d0ce6c832884ba56d555db8f67670d667b56549037deadf0499677";
   var SHEET = "xl/worksheets/sheet1.xml";
   var SHEET_RELS = "xl/worksheets/_rels/sheet1.xml.rels";
+  var WORKBOOK = "xl/workbook.xml";
   var DAYS = ["domingo", "lunes", "martes", "miércoles", "jueves", "viernes", "sábado"];
   var MONTHS_ES = ["enero", "febrero", "marzo", "abril", "mayo", "junio", "julio", "agosto", "septiembre", "octubre", "noviembre", "diciembre"];
 
@@ -67,10 +68,73 @@
     return relsXml.replace(re, "$1" + xml(url) + "$2");
   }
 
+
+  // Inserta "count" copias de la fila "after" justo debajo y desplaza todo lo que hay por debajo
+  // (celdas, celdas combinadas, enlaces, saltos de página y área de impresión).
+  function shiftRow(n, after, count) { return n > after ? n + count : n; }
+  function shiftRefs(text, after, count) {
+    return text.replace(/(\$?[A-Z]{1,3}\$?)(\d+)/g, function (m, col, row) { return col + shiftRow(Number(row), after, count); });
+  }
+  function insertRows(sheetXml, workbookXml, after, count, label) {
+    if (count <= 0) return [sheetXml, workbookXml];
+    var template = "";
+    sheetXml = sheetXml.replace(/<row r="(\d+)"([^>]*?)(\/>|>([\s\S]*?)<\/row>)/g, function (m, r, attrs, tail, inner) {
+      r = Number(r);
+      if (r === after) template = m;
+      if (r <= after) return m;
+      var body = inner === undefined ? "/>" : ">" + inner.replace(/ r="([A-Z]{1,3})(\d+)"/g, function (x, c, n) { return ' r="' + c + (Number(n) + count) + '"'; }) + "</row>";
+      return '<row r="' + (r + count) + '"' + attrs + body;
+    });
+    var copies = "";
+    for (var i = 1; i <= count; i++) {
+      var n = after + i;
+      var row = template.replace(/<row r="\d+"/, '<row r="' + n + '"').replace(/ r="([A-Z]{1,3})\d+"/g, ' r="$1' + n + '"');
+      if (label) {
+        var lab = label(i);
+        row = row.replace(new RegExp('<c r="' + label.col + n + '"([^>]*?)(/>|>[\\s\\S]*?</c>)'), function (x, a) {
+          var st = (a.match(/\ss="\d+"/) || [""])[0];
+          return '<c r="' + label.col + n + '"' + st + ' t="inlineStr"><is><t xml:space="preserve">' + xml(lab) + "</t></is></c>";
+        });
+      }
+      copies += row;
+    }
+    sheetXml = sheetXml.replace(template, template + copies);
+    // celdas combinadas: desplazar y copiar las de la fila modelo
+    var newMerges = "";
+    sheetXml = sheetXml.replace(/<mergeCell ref="([^"]+)"\s*\/>/g, function (m, ref) {
+      var rows = ref.match(/\d+/g).map(Number);
+      if (rows.every(function (x) { return x === after; })) {
+        for (var i = 1; i <= count; i++) newMerges += '<mergeCell ref="' + ref.replace(/\d+/g, String(after + i)) + '"/>';
+      }
+      return '<mergeCell ref="' + shiftRefs(ref, after, count) + '"/>';
+    });
+    sheetXml = sheetXml.replace("</mergeCells>", newMerges + "</mergeCells>")
+      .replace(/<mergeCells count="\d+"/, function () { return '<mergeCells count="' + (sheetXml.match(/<mergeCell ref=/g) || []).length + '"'; });
+    sheetXml = sheetXml.replace(/<mergeCells count="\d+"/, '<mergeCells count="' + (sheetXml.match(/<mergeCell ref=/g) || []).length + '"');
+    sheetXml = sheetXml.replace(/<hyperlink ref="([^"]+)"/g, function (m, ref) { return '<hyperlink ref="' + shiftRefs(ref, after, count) + '"'; })
+      .replace(/<dimension ref="([^"]+)"/, function (m, ref) { return '<dimension ref="' + shiftRefs(ref, after, count) + '"'; })
+      .replace(/<brk id="(\d+)"/g, function (m, id) { return '<brk id="' + shiftRow(Number(id), after, count) + '"'; });
+    workbookXml = workbookXml.replace(/(<definedName name="_xlnm\.Print_Area"[^>]*>)([^<]+)(<\/definedName>)/, function (m, a, ref, b) { return a + shiftRefs(ref, after, count) + b; });
+    return [sheetXml, workbookXml];
+  }
+
   // data: {date, event, client, space, poblacion, provincia, llegada, staff:[name], vehicles:[{name, plate, driver}]}
   function fillWorkbook(zip, data) {
-    return Promise.all([zip.file(SHEET).async("string"), zip.file(SHEET_RELS).async("string")]).then(function (parts) {
-      var s = parts[0], rels = parts[1];
+    return Promise.all([zip.file(SHEET).async("string"), zip.file(SHEET_RELS).async("string"), zip.file(WORKBOOK).async("string")]).then(function (parts) {
+      var s = parts[0], rels = parts[1], wbx = parts[2];
+      var staff = (data.staff || []).filter(str);
+      var vehicles = data.vehicles || [];
+      // una fila por persona y por vehículo: si no caben, se añaden filas a la plantilla
+      var nP = CELLS.personal.length, extraP = Math.max(0, staff.length - nP);
+      var lastP = Number(CELLS.personal[nP - 1].replace(/\D/g, ""));
+      var labelP = function (i) { return "Personal TUA " + (nP + i); }; labelP.col = "B";
+      var r1 = insertRows(s, wbx, lastP, extraP, labelP); s = r1[0]; wbx = r1[1];
+      var vRows = CELLS.vehiculoFilas.map(function (r) { return r + extraP; });
+      var extraV = Math.max(0, vehicles.length - vRows.length);
+      var r2 = insertRows(s, wbx, vRows[vRows.length - 1], extraV, null); s = r2[0]; wbx = r2[1];
+      for (var i = 1; i <= extraV; i++) vRows.push(vRows[vRows.length - 1] + 1);
+      var pRefs = CELLS.personal.slice();
+      for (var j = 1; j <= extraP; j++) pRefs.push("D" + (lastP + j));
       var lugar = [data.space, data.poblacion, data.provincia].filter(function (v, i, all) { return str(v) && !all.slice(0, i).some(function (p) { return norm(p).indexOf(norm(v)) >= 0; }); }).join(", ");
 
       s = setCell(s, CELLS.fecha, data.date ? longDate(data.date) : "");
@@ -82,14 +146,9 @@
       s = setCell(s, CELLS.cliente, data.client);
       CELLS.limpiar.forEach(function (ref) { s = setCell(s, ref, ""); });
 
-      var staff = (data.staff || []).filter(str);
-      CELLS.personal.forEach(function (ref, i) {
-        var isLast = i === CELLS.personal.length - 1;
-        s = setCell(s, ref, isLast ? staff.slice(i).join(", ") : staff[i] || "");
-      });
+      pRefs.forEach(function (ref, i) { s = setCell(s, ref, staff[i] || ""); });
 
-      var vehicles = data.vehicles || [];
-      CELLS.vehiculoFilas.forEach(function (row, i) {
+      vRows.forEach(function (row, i) {
         var v = vehicles[i] || {};
         s = setCell(s, "B" + row, v.driver);
         s = setCell(s, "E" + row, v.plate);
@@ -106,6 +165,7 @@
 
       zip.file(SHEET, s);
       zip.file(SHEET_RELS, rels);
+      zip.file(WORKBOOK, wbx);
       return zip;
     });
   }

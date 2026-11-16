@@ -325,6 +325,15 @@
     return bestScore >= 2 ? best : null;
   }
 
+  // recintos de la población del evento (por el texto del planning o por la población escrita)
+  function townVenues(list, ev, poblacion) {
+    var evText = " " + norm([ev.event, ev.space, poblacion].join(" ")) + " ";
+    return list.filter(function (v) {
+      var town = norm(v["POBLACIÓN"]);
+      return town && evText.indexOf(" " + town + " ") >= 0;
+    }).sort(function (a, b) { return Number(b["Nº HR"] || 0) - Number(a["Nº HR"] || 0); });
+  }
+
   function venueSummary(v) {
     if (!v) return "";
     var parts = [], links = ["MAPS RECINTO", "MAPS ACCESO CARGA", "MAPS PARKING"].filter(function (k) { return str(v[k]); }).length;
@@ -358,6 +367,7 @@
       '<h4>Datos del evento</h4><div class="hr-grid">' +
       '<label style="grid-column:1/-1">Actividad o evento<input class="field" id="hrEvento"></label>' +
       '<label style="grid-column:1/-1">Recinto del listado<input class="field" id="hrVenue" list="hrVenues" placeholder="Cargando recintos…" autocomplete="off"></label><datalist id="hrVenues"></datalist>' +
+      '<label style="grid-column:1/-1;display:none" id="hrTownWrap"><span id="hrTownLabel">Recintos en esta población</span><select class="field" id="hrTown" style="width:100%"></select></label>' +
       '<div class="hr-note" id="hrVenueInfo" style="grid-column:1/-1;margin-top:-2px"></div>' +
       '<label>Recinto (texto en la ficha)<input class="field" id="hrRecinto"></label><label>Cliente<input class="field" id="hrCliente"></label>' +
       '<label>Población<input class="field" id="hrPoblacion"></label><label>Provincia<input class="field" id="hrProvincia"></label>' +
@@ -374,7 +384,8 @@
     function setVenue(v) {
       venue = v || null;
       $("#hrVenue").value = venue ? venueLabel(venue) : "";
-      $("#hrVenueInfo").textContent = venue ? venueSummary(venue) : (venues.length ? "Sin recinto del listado: elige uno o deja el texto del planning." : "");
+      $("#hrVenueInfo").textContent = venue ? venueSummary(venue) : (venues.length ? "Sin recinto del listado: elígelo en la lista o búscalo arriba; si no, se usa el texto del planning." : "");
+      if (typeof townList !== "undefined" && townList.length) { var ti = townList.indexOf(venue); $("#hrTown").value = ti >= 0 ? String(ti) : ""; }
       if (venue) {
         $("#hrRecinto").value = str(venue["NOMBRE RECINTO"]);
         if (str(venue["POBLACIÓN"])) $("#hrPoblacion").value = str(venue["POBLACIÓN"]);
@@ -382,15 +393,34 @@
       }
     }
     function currentEvent() { return events[$("#hrEvent") ? Number($("#hrEvent").value) : 0] || {}; }
+    var townList = [];
+    function refreshTown() {
+      townList = venues.length ? townVenues(venues, currentEvent(), $("#hrPoblacion").value) : [];
+      var wrapT = $("#hrTownWrap");
+      if (!townList.length) { wrapT.style.display = "none"; return; }
+      wrapT.style.display = "";
+      $("#hrTownLabel").textContent = "Recintos fichados en " + str(townList[0]["POBLACIÓN"]) + " (" + townList.length + ")";
+      $("#hrTown").innerHTML = '<option value="">— Elige recinto —</option>' + townList.map(function (v, i) {
+        return '<option value="' + i + '">' + esc(str(v["NOMBRE RECINTO"])) + (Number(v["Nº HR"]) > 1 ? " · " + v["Nº HR"] + " HR" : "") + "</option>";
+      }).join("");
+      var idx = venue ? townList.indexOf(venue) : -1;
+      $("#hrTown").value = idx >= 0 ? String(idx) : "";
+    }
     loadRecintos().then(function (list) {
       venues = list;
       $("#hrVenues").innerHTML = list.map(function (v) { return '<option value="' + esc(venueLabel(v)) + '"></option>'; }).join("");
       $("#hrVenue").placeholder = "Escribe para buscar entre " + list.length + " recintos";
       setVenue(bestVenue(list, currentEvent()));
+      refreshTown();
     }).catch(function () {
       $("#hrVenue").placeholder = "No se pudo cargar el listado de recintos";
       $("#hrVenue").disabled = true;
     });
+    $("#hrTown").addEventListener("change", function () {
+      var v = townList[Number($("#hrTown").value)];
+      if ($("#hrTown").value !== "" && v) setVenue(v);
+    });
+    $("#hrPoblacion").addEventListener("change", function () { if (!venue) refreshTown(); });
     $("#hrVenue").addEventListener("change", function () {
       var val = $("#hrVenue").value, v = venues.find(function (x) { return venueLabel(x) === val; });
       if (v) setVenue(v);
@@ -413,7 +443,7 @@
         v.driver = workerNames.find(function (n) { return norm(n) && norm(v.value).indexOf(norm(n)) >= 0; }) || "";
         return v;
       });
-      if (venues.length) setVenue(bestVenue(venues, ev));
+      if (venues.length) { setVenue(bestVenue(venues, ev)); refreshTown(); }
       $("#hrLists").innerHTML = "<h4>Personal TUA (el primero marcado será el responsable)</h4>" + checklist(staff, "staff") +
         "<h4>Vehículos</h4>" + checklist(vehicles, "veh", function (v) { return v.driver ? " · conductor: " + esc(v.driver) : ""; });
     }

@@ -11,6 +11,9 @@
   // SHA-256 de la contraseña para generar fichas (no se guarda en claro)
   var PASSWORD_SHA256 = "ce512dbba6d0ce6c832884ba56d555db8f67670d667b56549037deadf0499677";
   var SHEET = "xl/worksheets/sheet1.xml";
+  var STAFF_TEMPLATE_URL = "./plantilla-staff.xlsx";
+  var GO_LABEL_STAFF = "Descargar listado";
+  var STAFF_ROWS = { personalDesde: 4, personalHasta: 60, vehiculosDesde: 64, vehiculosHasta: 82 };
   var SHEET_RELS = "xl/worksheets/_rels/sheet1.xml.rels";
   var WORKBOOK = "xl/workbook.xml";
   var DAYS = ["domingo", "lunes", "martes", "miércoles", "jueves", "viernes", "sábado"];
@@ -204,6 +207,51 @@
       return zip;
     });
   }
+
+  // Listado de staff: una fila por persona y por vehículo marcados (plantilla-staff.xlsx)
+  function fillStaff(zip, data) {
+    return zip.file(SHEET).async("string").then(function (s) {
+      var P = data.people || null;
+      var byPlan = P ? indexBy(P.personal, "NOMBRE EN PLANNING") : {}, byFull = P ? indexBy(P.personal, "NOMBRE Y APELLIDOS") : {};
+      var person = function (name) { return byPlan[nameKey(name)] || byFull[nameKey(name)] || null; };
+      var vByPlan = P ? indexBy(P.vehiculos, "NOMBRE EN PLANNING") : {};
+      var show = function (xml, row) { return xml.replace(new RegExp('(<row r="' + row + '"[^>]*?)\\s+hidden="(?:1|true)"'), "$1"); };
+      var R = STAFF_ROWS;
+      var staff = (data.staff || []).filter(str), vehicles = data.vehicles || [];
+      var maxP = R.personalHasta - R.personalDesde + 1, maxV = R.vehiculosHasta - R.vehiculosDesde + 1;
+      if (staff.length > maxP) throw new Error("El listado admite " + maxP + " personas como máximo.");
+      if (vehicles.length > maxV) throw new Error("El listado admite " + maxV + " vehículos como máximo.");
+      s = setCell(s, "B2", "Tuá                            Staff Técnico 2027" + (str(data.event) ? "  ·  " + str(data.event) : "") + (data.date ? "  ·  " + longDate(data.date) : ""));
+      staff.forEach(function (who, i) {
+        var row = R.personalDesde + i, rec = person(who);
+        var prev = rec ? str(rec["RECURSO PREVENTIVO"]) : "";
+        if (/^(s[ií]|x)$/i.test(prev)) prev = "Recurso preventivo"; else if (/^no$/i.test(prev)) prev = "";
+        s = show(s, row);
+        s = setCell(s, "B" + row, rec ? (str(rec["NOMBRE Y APELLIDOS"]) || who) : who);
+        s = setCell(s, "C" + row, rec ? rec["PUESTO / ESPECIALIDAD"] : "");
+        s = setCell(s, "E" + row, rec ? rec["EMPRESA"] : "");
+        s = setCell(s, "F" + row, rec ? rec["DNI"] : "");
+        s = setCell(s, "G" + row, rec ? rec["TELÉFONO"] : "");
+        s = setCell(s, "H" + row, prev);
+      });
+      vehicles.forEach(function (v, i) {
+        var row = R.vehiculosDesde + i, rec = v.name ? vByPlan[nameKey(v.name)] : null;
+        var driverName = v.driver || (rec ? str(rec["CONDUCTOR HABITUAL"]) : "");
+        var drv = driverName ? person(driverName) : null;
+        s = show(s, row);
+        s = setCell(s, "B" + row, drv ? (str(drv["NOMBRE Y APELLIDOS"]) || driverName) : driverName);
+        s = setCell(s, "C" + row, (rec && str(rec["MATRÍCULA"])) || v.plate);
+        s = setCell(s, "D" + row, rec ? rec["REMOLQUE"] : "");
+        s = setCell(s, "E" + row, (rec && str(rec["EMPRESA"])) || (drv ? drv["EMPRESA"] : ""));
+        s = setCell(s, "F" + row, drv ? drv["DNI"] : "");
+        s = setCell(s, "G" + row, (drv && str(drv["TELÉFONO"])) || (rec ? rec["TELÉFONO CONDUCTOR"] : ""));
+        s = setCell(s, "H" + row, (rec && str(rec["CARACTERÍSTICAS"])) || v.name);
+      });
+      zip.file(SHEET, s);
+      return zip;
+    });
+  }
+  function staffFileName(data) { return fileName(data).replace(/^HR_/, "Staff_"); }
 
   function fileName(data) {
     var slug = norm(data.event || data.client || "evento").replace(/[^a-z0-9]+/g, "_").replace(/^_|_$/g, "").slice(0, 40);
@@ -404,7 +452,8 @@
     return parts.length ? "Se rellenará del listado: " + parts.join(", ") + ". (Tomas y contactos son del último evento allí: revísalos.)" : "Este recinto no tiene más datos en el listado.";
   }
 
-  function open(date, eventIndex) {
+  function open(date, eventIndex, mode) {
+    var isStaff = mode === "staff";
     var model = root.model || {};
     var base = (model.events || []).find(function (x) { return x.date === date; });
     if (!base) return;
@@ -418,7 +467,7 @@
     var wrap = document.createElement("div");
     wrap.className = "hr-backdrop";
     wrap.innerHTML = '<div class="hr-modal" role="dialog" aria-modal="true" aria-label="Generar ficha HR">' +
-      '<h3>Ficha HR</h3><div class="muted">' + esc(longDate(date)) + "</div>" +
+      '<h3>' + (isStaff ? "Listado de personal" : "Ficha HR") + '</h3><div class="muted">' + esc(longDate(date)) + "</div>" +
       (events.length > 1 ? '<h4>Evento del día</h4><select class="field" id="hrEvent" style="width:100%">' +
         events.map(function (e, i) { return '<option value="' + i + '">' + esc([e.event, e.space].filter(str).join(" · ") || "Evento " + (i + 1)) + "</option>"; }).join("") + "</select>" : "") +
       '<h4>Datos del evento</h4><div class="hr-grid">' +
@@ -436,6 +485,14 @@
       '<div class="hr-note" id="hrPassError" style="color:var(--coral)"></div>' +
       '<div class="hr-actions"><button class="button" data-hr="cancel">Cancelar</button><button class="button primary" data-hr="go">Descargar Excel</button></div></div>';
     document.body.appendChild(wrap);
+    if (isStaff) {
+      // En el listado de personal solo hacen falta el evento y la gente marcada
+      ["#hrVenue", "#hrTownWrap", "#hrVenueInfo", "#hrRecinto", "#hrCliente", "#hrPoblacion", "#hrProvincia", "#hrLlegada"].forEach(function (sel) {
+        var el = wrap.querySelector(sel); if (!el) return;
+        var box = (el.closest && el.closest("label")) || el; box.style.display = "none"; box.setAttribute("data-hidden-staff", "1");
+      });
+      wrap.querySelector('[data-hr="go"]').textContent = GO_LABEL_STAFF;
+    }
     var $ = function (sel) { return wrap.querySelector(sel); };
 
     function setVenue(v) {
@@ -512,7 +569,7 @@
     wrap.addEventListener("click", function (e) { if (e.target === wrap) close(); });
     $('[data-hr="cancel"]').addEventListener("click", close);
     $('[data-hr="go"]').addEventListener("click", function () {
-      var btn = this;
+      var btn = this, goLabel = isStaff ? GO_LABEL_STAFF : "Descargar Excel";
       var picked = function (attr, list) {
         return Array.prototype.filter.call(wrap.querySelectorAll("[data-" + attr + "]"), function (c) { return c.checked; })
           .map(function (c) { return list[Number(c.getAttribute("data-" + attr))]; });
@@ -530,35 +587,39 @@
         if (hash !== PASSWORD_SHA256) {
           var err = new Error("Contraseña incorrecta."); err.password = true; throw err;
         }
-        if (!personalUrl()) { btn.textContent = "Generando…"; return generate(data); }
+        if (!personalUrl()) { btn.textContent = "Generando…"; return generate(data, isStaff); }
         btn.textContent = "Cargando personal…";
         return loadPersonal($("#hrPassword").value).then(function (people) { data.people = people; }, function (err) {
-          if (!confirm(err.message + "\n\n¿Generar la ficha con los nombres del planning?")) { var e2 = new Error("cancelado"); e2.cancel = true; throw e2; }
-        }).then(function () { btn.textContent = "Generando…"; return generate(data); });
+          if (!confirm(err.message + "\n\n¿Generar con los nombres del planning?")) { var e2 = new Error("cancelado"); e2.cancel = true; throw e2; }
+        }).then(function () { btn.textContent = "Generando…"; return generate(data, isStaff); });
       }).then(close).catch(function (err) {
-        if (err.cancel) { btn.disabled = false; btn.textContent = "Descargar Excel"; return; }
+        if (err.cancel) { btn.disabled = false; btn.textContent = goLabel; return; }
         if (err.password) {
           $("#hrPassError").textContent = err.message;
           $("#hrPassword").value = ""; $("#hrPassword").focus();
-          btn.disabled = false; btn.textContent = "Descargar Excel";
+          btn.disabled = false; btn.textContent = goLabel;
           return;
         }
         alert("No se pudo generar la ficha: " + err.message);
-        btn.disabled = false; btn.textContent = "Descargar Excel";
+        btn.disabled = false; btn.textContent = goLabel;
       });
     });
   }
 
-  function generate(data) {
-    return fetch(TEMPLATE_URL + "?_=" + Date.now(), { cache: "no-store" }).then(function (r) {
+  function generate(data, isStaff) {
+    if (isStaff) return generateFrom(STAFF_TEMPLATE_URL, fillStaff, staffFileName, data);
+    return generateFrom(TEMPLATE_URL, fillWorkbook, fileName, data);
+  }
+  function generateFrom(url, fill, nameFn, data) {
+    return fetch(url + "?_=" + Date.now(), { cache: "no-store" }).then(function (r) {
       if (!r.ok) throw new Error("No se encontró la plantilla (HTTP " + r.status + ").");
       return r.arrayBuffer();
     }).then(function (buf) { return root.JSZip.loadAsync(buf); })
-      .then(function (zip) { return fillWorkbook(zip, data); })
+      .then(function (zip) { return fill(zip, data); })
       .then(function (zip) { return zip.generateAsync({ type: "blob", mimeType: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", compression: "DEFLATE" }); })
       .then(function (blob) {
         var a = document.createElement("a");
-        a.href = URL.createObjectURL(blob); a.download = fileName(data);
+        a.href = URL.createObjectURL(blob); a.download = nameFn(data);
         document.body.appendChild(a); a.click();
         setTimeout(function () { URL.revokeObjectURL(a.href); a.remove(); }, 1000);
       });
@@ -578,7 +639,7 @@
     });
   }
 
-  var api = { open: open, fillWorkbook: fillWorkbook, fileName: fileName, extractPlate: extractPlate, longDate: longDate };
+  var api = { open: open, fillWorkbook: fillWorkbook, fillStaff: fillStaff, fileName: fileName, extractPlate: extractPlate, longDate: longDate };
   if (typeof module !== "undefined" && module.exports) module.exports = api;
   else root.TUAFichaHR = api;
 })(typeof window !== "undefined" ? window : globalThis);

@@ -2,7 +2,7 @@
 <html lang="es">
 <head>
   <meta charset="utf-8">
-  <script>/* Comprueba si hay versión nueva del portal y recarga sin caché */(function(){var BUILD="202611171152";try{fetch("./version.txt?_="+Date.now(),{cache:"no-store"}).then(function(r){return r.ok?r.text():""}).then(function(v){v=String(v||"").trim();if(!v||v===BUILD)return;var q=new URLSearchParams(location.search);if(q.get("v")===v)return;q.set("v",v);location.replace(location.pathname+"?"+q.toString()+location.hash)}).catch(function(){})}catch(e){}})();</script>
+  <script>/* Comprueba si hay versión nueva del portal y recarga sin caché */(function(){var BUILD="202611171154";try{fetch("./version.txt?_="+Date.now(),{cache:"no-store"}).then(function(r){return r.ok?r.text():""}).then(function(v){v=String(v||"").trim();if(!v||v===BUILD)return;var q=new URLSearchParams(location.search);if(q.get("v")===v)return;q.set("v",v);location.replace(location.pathname+"?"+q.toString()+location.hash)}).catch(function(){})}catch(e){}})();</script>
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="theme-color" content="#102d28">
   <title>Planificación TUA 2027</title>
@@ -52,7 +52,7 @@
   <div class="toast hidden" id="toast" role="status"></div>
   <script src="./data-source.js?v=5"></script>
   <script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
-  <script src="./ficha-hr.js?v=13"></script>
+  <script src="./ficha-hr.js?v=14"></script>
   <script>
     var MONTHS=["Enero","Febrero","Marzo","Abril","Mayo","Junio","Julio","Agosto","Septiembre","Octubre","Noviembre","Diciembre"],WEEKDAYS=["Lun","Mar","Mié","Jue","Vie","Sáb","Dom"];
     var workbookSheets={},model={workers:[],vehicles:[],events:[],requests:[]},selectedWorker="",selectedVehicle="",selectedProductionDate="";

@@ -511,7 +511,7 @@
     function refreshTown() {
       townList = venues.length ? townVenues(venues, currentEvent(), $("#hrPoblacion").value) : [];
       var wrapT = $("#hrTownWrap");
-      if (!townList.length) { wrapT.style.display = "none"; return; }
+      if (!townList.length || isStaff) { wrapT.style.display = "none"; return; }
       wrapT.style.display = "";
       $("#hrTownLabel").textContent = "Recintos fichados en " + str(townList[0]["POBLACIÓN"]) + " (" + townList.length + ")";
       $("#hrTown").innerHTML = '<option value="">— Elige recinto —</option>' + townList.map(function (v, i) {
